@@ -40,6 +40,8 @@ import wandb
 import argparse
 import logging
 
+# from sklearn.preprocessing import binarize
+
 import warnings
 
 # Ignore all warnings
@@ -116,7 +118,7 @@ def add_args(parser):
         
     # Federated learning related arguments
     parser.add_argument('--client_epoch', default=1, type=int)
-    parser.add_argument('--client_number', type=int, default=10, metavar='NN',
+    parser.add_argument('--client_number', type=int, default=2, metavar='NN',
                         help='number of workers in a distributed cluster')
     parser.add_argument('--batch_size', type=int, default=100, metavar='N',
                         help='input batch size for training (default: 64)')
@@ -129,6 +131,11 @@ def add_args(parser):
     parser.add_argument('--whether_dcor', default=False, type=bool)
     parser.add_argument('--dcor_coefficient', default=0.5, type=float)  # same as alpha in paper
     parser.add_argument('--PatchShuffle', default=0, type=int)  
+    
+    
+    parser.add_argument('--whether_binarize', default=True, type=bool)
+    parser.add_argument('--Quantize_scales', type=float, default=0.1, help='Description of Quantize_scales')
+    parser.add_argument('--Quantize_zero_points', type=float, default=1, help='Description of Quantize_zero_points')
     
     
     
@@ -587,6 +594,12 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted
     
     net_server = copy.deepcopy(net_model_server_tier[idx]).to(device)
     
+    if args.whether_binarize:
+        # client_fx = torch.where(client_fx > torch.mean(client_fx), 1.0, 0.0).bool().numpy().astype(bool)
+        
+        fx_client = fx_client.dequantize()
+        fx_client.requires_grad = True
+    
     net_server.train()
     # optimizer_server = torch.optim.Adam(net_server.parameters(), lr = lr)
     lr = new_lr
@@ -619,7 +632,11 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted
     #--------backward prop--------------
 
     loss.backward()  
+    # Check if grad is not None before cloning and detaching (becuae after quntization)
+    # if fx_client.grad is not None:
     dfx_client = fx_client.grad.clone().detach()
+    # else:
+    #     dfx_client = 
     # dfx_client = fx_client.grad.clone().detach()
     optimizer_server.step()
     batch_loss_train.append(loss.item())
@@ -850,7 +867,11 @@ class Client(object):
                 else:
                     client_fx = fx.clone().detach().requires_grad_(True)
                 
-                
+                if args.whether_binarize:
+                    # client_fx = torch.where(client_fx > torch.mean(client_fx), 1.0, 0.0).bool().numpy().astype(bool)
+                    
+                    client_fx = torch.quantize_per_tensor(client_fx, args.Quantize_scales, args.Quantize_zero_points, torch.quint8)
+                    
                 # Sending activations to server and receiving gradients from server
                 time_client += time.time() - time_s
                 dfx = train_server(client_fx, labels, iter, self.local_ep, self.idx, len_batch, _)
