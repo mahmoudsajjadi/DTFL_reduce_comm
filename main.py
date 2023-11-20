@@ -57,6 +57,7 @@ from utils.loss import PatchShuffle
 from utils.loss import dis_corr
 from utils.fedavg import aggregated_fedavg
 from utils.huffman import ArithmeticEncoding
+from utils.huffman import huffman_coding, huffman_decode
 
 
 from utils.TierScheduler import TierScheduler
@@ -139,6 +140,8 @@ def add_args(parser):
     parser.add_argument('--Quantize_scales', type=float, default=0.1, help='Description of Quantize_scales')
     parser.add_argument('--Quantize_zero_points', type=float, default=1, help='Description of Quantize_zero_points')
     
+    parser.add_argument('--whether_huffman', default=True, type=bool)
+    
     
     
     # Add the argument for simulation like net_speed_list
@@ -206,7 +209,7 @@ client_epoch = np.ones(args.client_number,dtype=int) * client_epoch
 client_type_percent = [0.0, 0.0, 0.0, 0.0, 1.0]
 
 if num_tiers == 7:
-    client_type_percent = [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    client_type_percent = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     tier = 1
 
     
@@ -588,13 +591,18 @@ times_in_server = []
         
         
 # Server-side function associated with Training 
-def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted_features):
+def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted_features,
+                 huffman_codes =_, encoded_data=_, tensor_shape=_):
     global net_model_server, criterion, optimizer_server, device, batch_acc_train, batch_loss_train, l_epoch_check, fed_check
     global loss_train_collect, acc_train_collect, count1, acc_avg_all_user_train, loss_avg_all_user_train, idx_collect, w_locals_server, w_glob_server, net_server, time_train_server_train, time_train_server_train_all, w_glob_server_tier, w_locals_server_tier, w_locals_tier
     global loss_train_collect_user, acc_train_collect_user, lr, total_time, times_in_server, new_lr
     time_train_server_s = time.time()
     
     net_server = copy.deepcopy(net_model_server_tier[idx]).to(device)
+    
+    if args.whether_huffman:
+        fx_client = huffman_decode(encoded_data, huffman_codes, tensor_shape)
+        
     
     if args.whether_binarize:
         # client_fx = torch.where(client_fx > torch.mean(client_fx), 1.0, 0.0).bool().numpy().astype(bool)
@@ -868,27 +876,36 @@ class Client(object):
                     client_fx = fx_shuffled.clone().detach().requires_grad_(True)
                 else:
                     client_fx = fx.clone().detach().requires_grad_(True)
+                    
                 
                 if args.whether_binarize:
                     # client_fx = torch.where(client_fx > torch.mean(client_fx), 1.0, 0.0).bool().numpy().astype(bool)
                     
                     client_fx = torch.quantize_per_tensor(client_fx, args.Quantize_scales, args.Quantize_zero_points, torch.quint8)
                     
-                    # Assuming client_fx is your quantized tensor
-                    values = client_fx.int_repr().view(-1).to('cpu').numpy()
+                    # # Assuming client_fx is your quantized tensor
+                    # values = client_fx.int_repr().view(-1).to('cpu').numpy()
                     
-                    # Count unique values and their frequencies
-                    unique_values, counts = np.unique(values, return_counts=True)
+                    # # Count unique values and their frequencies
+                    # unique_values, counts = np.unique(values, return_counts=True)
                     
-                    # Create a dictionary that maps unique values to their frequencies
-                    unique_counts = dict(zip(unique_values, counts))
-                    arithmetic_encoder = ArithmeticEncoding(unique_counts)
-                    probability_table = arithmetic_encoder.get_probability_table(unique_counts)
-                    encoder, encoded_msg = arithmetic_encoder.encode(client_fx, probability_table)
+                    # # Create a dictionary that maps unique values to their frequencies
+                    # unique_counts = dict(zip(unique_values, counts))
+                    # arithmetic_encoder = ArithmeticEncoding(unique_counts)
+                    # probability_table = arithmetic_encoder.get_probability_table(unique_counts)
+                    # encoder, encoded_msg = arithmetic_encoder.encode(client_fx, probability_table)
+                    
+                
+                if args.whether_huffman:
+                    huffman_codes, encoded_data, tensor_shape = huffman_coding(client_fx)
                     
                 # Sending activations to server and receiving gradients from server
                 time_client += time.time() - time_s
-                dfx = train_server(client_fx, labels, iter, self.local_ep, self.idx, len_batch, _)
+                if args.whether_huffman:
+                    dfx = train_server(client_fx, labels, iter, self.local_ep, self.idx, len_batch, _, 
+                                       huffman_codes = huffman_codes, encoded_data = encoded_data, tensor_shape = tensor_shape)
+                else:
+                    dfx = train_server(client_fx, labels, iter, self.local_ep, self.idx, len_batch, _)
                 
                 
                 #--------backward prop -------------

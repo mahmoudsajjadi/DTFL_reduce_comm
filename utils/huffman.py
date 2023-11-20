@@ -103,3 +103,150 @@ class ArithmeticEncoding:
         decoder.append(stage_probs)
 
         return decoder, decoded_msg
+    
+import numpy as np
+from collections import Counter
+import heapq
+import torch
+from bitarray import bitarray
+
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.value = None
+
+def build_trie(huffman_codes):
+    root = TrieNode()
+    for code, value in huffman_codes.items():
+        node = root
+        for bit in code:
+            if bit not in node.children:
+                node.children[bit] = TrieNode()
+            node = node.children[bit]
+        node.value = value
+    return root
+
+def huffman_coding(tensor):
+    
+    # check if quint8 , else it can not flatten
+    if tensor.dtype == torch.quint8:
+        tensor = tensor.dequantize()
+        
+    # Flatten the tensor and convert it to a list
+    flattened_tensor = tensor.flatten().tolist()
+    
+    # Count the frequency of each value in the tensor
+    frequency = Counter(flattened_tensor)
+    
+    # Create nodes for each value-frequency pair
+    nodes = [[weight, [value, '']] for value, weight in frequency.items()]
+    
+    # Build the Huffman tree
+    heapq.heapify(nodes)
+    while len(nodes) > 1:
+        left = heapq.heappop(nodes)
+        right = heapq.heappop(nodes)
+        
+        for pair in left[1:]:
+            pair[1] = '0' + pair[1]
+        for pair in right[1:]:
+            pair[1] = '1' + pair[1]
+        
+        heapq.heappush(nodes, [left[0] + right[0]] + left[1:] + right[1:])
+    
+    # Generate the Huffman codes for each value
+    huffman_codes = {}
+    for pair in nodes[0][1:]:
+        # huffman_codes[pair[0]] = pair[1]
+        huffman_codes[round(pair[0], 5)] = pair[1]
+        
+    
+        
+    # Initialize an empty bitarray
+    bits = bitarray()
+    
+    # Extend the bits based on Huffman codes
+    for val in flattened_tensor: # this part is time consuming
+        bits.extend(map(int, huffman_codes[round(val, 5)])) # to avoid precision issues
+        
+    # Convert the bitarray to bytes
+    byte_representation = bits.tobytes()
+    
+    
+    # # rounded_tensor = np.round(your_tensor, 6)
+    # encoded_data = ''.join([huffman_codes[val] for val in flattened_tensor])
+    
+    # # Convert the string to its integer representation
+    # int_representation = int(encoded_data, 2)
+    # # Pack the integer into bytes using the appropriate number of bytes
+    # num_bytes = (len(encoded_data) + 7) // 8  # Calculate the number of bytes required
+    # byte_representation = int_representation.to_bytes(num_bytes, byteorder='big')
+    # bits = np.array([int(x) for x in byte_representation], dtype=np.uint8)
+    tensor_shape = tensor.shape
+        
+
+    
+    return huffman_codes, byte_representation, tensor_shape
+
+
+def huffman_decode(encoded_data, huffman_codes, tensor_shape):
+    # Invert the Huffman codes
+    inverted_codes = {code: value for value, code in huffman_codes.items()}
+    
+    # encoded_data = ''.join(format(byte, '08b') for byte in encoded_data)
+    
+    # Decode the encoded data using the inverted Huffman codes
+    # decoded_data = ''
+    decoded_data =[]
+    current_code = ''
+    # for bit in encoded_data:
+    #     current_code += bit
+    #     if current_code in inverted_codes:
+    #         # decoded_data += ','+str(inverted_codes[current_code])
+    #         decoded_data.append(inverted_codes[current_code])
+    #         current_code = ''
+    # '''
+    # Extracting bits for decoding
+    for byte in encoded_data: # maybe using a tree is faster than this dic data
+        for i in range(8):  # 8 bits in a byte
+            current_bit = (byte >> (7 - i)) & 1  # Extract each bit
+            current_code += str(current_bit)
+    
+            if current_code in inverted_codes:
+                decoded_data.append(inverted_codes[current_code])
+                current_code = ''
+    
+    # '''
+    
+    
+    # Reshape the decoded data into the original tensor shape
+    original_tensor = np.array(decoded_data[:-1]).reshape(tensor_shape)
+    return original_tensor
+
+def huffman_decode1(encoded_data, huffman_codes, tensor_shape):
+    # Convert float keys to strings
+    root = {str(key): value for key, value in huffman_codes.items()}
+    
+    # Then call the build_trie function
+    build_trie(huffman_codes)
+    decoded_data = []
+
+    current_node = root
+    for byte in encoded_data:
+        for i in range(7, -1, -1):  # Loop through bits in byte
+            bit = (byte >> i) & 1
+            if str(bit) not in current_node.children:
+                break
+            current_node = current_node.children[str(bit)]
+            if current_node.value is not None:
+                decoded_data.append(current_node.value)
+                current_node = root
+    original_tensor = np.array(decoded_data[:-1]).reshape(tensor_shape)
+    return original_tensor
+
+
+
+# # Decoding the Huffman-coded data back to the original tensor
+# decoded_tensor = huffman_decode(encoded_data, huffman_result)
+# print(your_tensor)
+# print(decoded_tensor)
