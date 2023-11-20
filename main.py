@@ -56,6 +56,8 @@ from model.resnet import resnet110_SFL_local_tier_7
 from utils.loss import PatchShuffle
 from utils.loss import dis_corr
 from utils.fedavg import aggregated_fedavg
+from utils.huffman import ArithmeticEncoding
+
 
 from utils.TierScheduler import TierScheduler
 from api.data_preprocessing.cifar10.data_loader import load_partition_data_cifar10
@@ -872,6 +874,18 @@ class Client(object):
                     
                     client_fx = torch.quantize_per_tensor(client_fx, args.Quantize_scales, args.Quantize_zero_points, torch.quint8)
                     
+                    # Assuming client_fx is your quantized tensor
+                    values = client_fx.int_repr().view(-1).to('cpu').numpy()
+                    
+                    # Count unique values and their frequencies
+                    unique_values, counts = np.unique(values, return_counts=True)
+                    
+                    # Create a dictionary that maps unique values to their frequencies
+                    unique_counts = dict(zip(unique_values, counts))
+                    arithmetic_encoder = ArithmeticEncoding(unique_counts)
+                    probability_table = arithmetic_encoder.get_probability_table(unique_counts)
+                    encoder, encoded_msg = arithmetic_encoder.encode(client_fx, probability_table)
+                    
                 # Sending activations to server and receiving gradients from server
                 time_client += time.time() - time_s
                 dfx = train_server(client_fx, labels, iter, self.local_ep, self.idx, len_batch, _)
@@ -1183,6 +1197,9 @@ for iter in range(epochs):
                                               , delay_coefficient[idx], duration) # this is simulated delay
 
         wandb.log({"Client{}_Total_Delay".format(idx): simulated_delay[idx], "epoch": iter}, commit=False)
+        wandb.log({"Client{}_Data_Transmission(MB)".format(idx): data_transmitted_client/1024**2, "epoch": iter}, commit=False)
+        wandb.log({"Client{}_Data_Transmission(MB)_Model_Parameters".format(idx): client_model_parameter_data_size/1024**2, "epoch": iter}, commit=False)
+        wandb.log({"Client{}_Data_Transmission(MB)_Intermediate_data".format(idx): client_intermediate_data_size/1024**2, "epoch": iter}, commit=False)
         
     server_wait_first_to_last_client = (max(simulated_delay * client_epoch) - min(simulated_delay * client_epoch))
     training_time = (max(simulated_delay)) 

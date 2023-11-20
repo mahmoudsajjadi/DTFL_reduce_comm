@@ -37,14 +37,10 @@ warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../")))
 
-from model.resnet56 import resnet56_SFL_local_tier
-from model.resnet110_7t import resnet56_SFL_local_tier_7
-from model.resnet110_7t import resnet56_SFL_tier_7
-from model.resnet110_7t import resnet56_SFL_fedavg_base
-from model.resnet110_7t import resnet110_SFL_fedavg_base
-from model.resnet import resnet56_base
-from model.resnet import resnet110_base
+from model.resnet import resnet56_SFL_local_tier_7
+from model.resnet import resnet110_SFL_fedavg_base
 from model.resnet import resnet110_SFL_local_tier_7
+
 
 
 # from model.resnet101 import resnet101_local_tier
