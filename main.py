@@ -114,7 +114,7 @@ def add_args(parser):
     parser.add_argument('--dataset', type=str, default='cifar10', metavar='N',
                         help='dataset used for training')
     parser.add_argument('--data_dir', type=str, default='./data', help='data directory')
-    parser.add_argument('--partition_method', type=str, default='hetero', metavar='N',
+    parser.add_argument('--partition_method', type=str, default='homo', metavar='N',
                         help='how to partition the dataset on local workers')
     parser.add_argument('--partition_alpha', type=float, default=0.5, metavar='PA',
                         help='partition alpha (default: 0.5)')
@@ -123,7 +123,7 @@ def add_args(parser):
     parser.add_argument('--client_epoch', default=1, type=int)
     parser.add_argument('--client_number', type=int, default=2, metavar='NN',
                         help='number of workers in a distributed cluster')
-    parser.add_argument('--batch_size', type=int, default=100, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=1, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--rounds', default=300, type=int)
     parser.add_argument('--whether_local_loss', default=True, type=bool)
@@ -209,7 +209,7 @@ client_epoch = np.ones(args.client_number,dtype=int) * client_epoch
 client_type_percent = [0.0, 0.0, 0.0, 0.0, 1.0]
 
 if num_tiers == 7:
-    client_type_percent = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    client_type_percent = [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
     tier = 1
 
     
@@ -602,6 +602,7 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted
     
     if args.whether_huffman:
         fx_client = huffman_decode(encoded_data, huffman_codes, tensor_shape)
+        fx_client = torch.from_numpy(fx_client)
         
     
     if args.whether_binarize:
@@ -644,7 +645,8 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted
     loss.backward()  
     # Check if grad is not None before cloning and detaching (becuae after quntization)
     # if fx_client.grad is not None:
-    dfx_client = fx_client.grad.clone().detach()
+    if not args.whether_local_loss:
+        dfx_client = fx_client.grad.clone().detach()
     # else:
     #     dfx_client = 
     # dfx_client = fx_client.grad.clone().detach()
@@ -729,7 +731,10 @@ def train_server(fx_client, y, l_epoch_count, l_epoch, idx, len_batch, extracted
     # print(time_train_server_copy, time_train_server_train)
     # send gradients to the client               
     # return dfx_client
-    return dfx_client  # output of server 
+    if args.whether_local_loss:
+        return   # output of server 
+    else: 
+        return dfx_client
 
 # Server-side functions associated with Testing
 def evaluate_server(fx_client, y, idx, len_batch, ell):
@@ -929,9 +934,12 @@ class Client(object):
                 optimizer_client.step()
                 time_client += time.time() - time_s
                 
-                
-                client_intermediate_data_size += (sys.getsizeof(client_fx.storage()) + 
-                                      sys.getsizeof(labels.storage()))
+                if args.whether_huffman:
+                    client_intermediate_data_size += (sys.getsizeof(encoded_data) + (sys.getsizeof(huffman_codes) +
+                                          sys.getsizeof(labels.storage()))) 
+                else:
+                    client_intermediate_data_size += (sys.getsizeof(client_fx.storage()) + 
+                                          sys.getsizeof(labels.storage()))
                     
                 
             

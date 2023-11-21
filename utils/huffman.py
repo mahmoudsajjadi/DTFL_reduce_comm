@@ -110,21 +110,31 @@ import heapq
 import torch
 from bitarray import bitarray
 
-class TrieNode:
+class Node:
     def __init__(self):
-        self.children = {}
         self.value = None
+        self.children = {}
 
-def build_trie(huffman_codes):
-    root = TrieNode()
-    for code, value in huffman_codes.items():
-        node = root
+
+class Trie:
+    def __init__(self):
+        self.root = Node()
+
+    def add(self, code, value):
+        node = self.root
         for bit in code:
             if bit not in node.children:
-                node.children[bit] = TrieNode()
+                node.children[bit] = Node()
             node = node.children[bit]
         node.value = value
-    return root
+
+    def find(self, code):
+        node = self.root
+        for bit in code:
+            if bit not in node.children:
+                return None
+            node = node.children[bit]
+        return node.value
 
 def huffman_coding(tensor):
     
@@ -189,7 +199,38 @@ def huffman_coding(tensor):
     return huffman_codes, byte_representation, tensor_shape
 
 
+
 def huffman_decode(encoded_data, huffman_codes, tensor_shape):
+    
+    trie = Trie()
+    for code, value in huffman_codes.items():
+        trie.add(value, code)
+
+    decoded_data =[]
+    current_code = ""
+    for byte in encoded_data:
+        for i in range(8):
+            current_bit = (byte >> (7 - i)) & 1
+            current_code += str(current_bit)
+    
+            value = trie.find(current_code)
+            if value is not None:
+                decoded_data.append(value)
+                current_code = ""
+    
+    # '''
+    
+    
+    # Reshape the decoded data into the original tensor shape
+    if len(decoded_data) != np.prod(tensor_shape): # to handle bit to byte manipulation as it add some zeros
+        original_tensor = np.array(decoded_data[:np.prod(tensor_shape)]).reshape(tensor_shape)
+    else:
+        original_tensor = np.array(decoded_data).reshape(tensor_shape)
+    return original_tensor
+
+
+
+def huffman_decode2(encoded_data, huffman_codes, tensor_shape):
     # Invert the Huffman codes
     inverted_codes = {code: value for value, code in huffman_codes.items()}
     
@@ -214,13 +255,17 @@ def huffman_decode(encoded_data, huffman_codes, tensor_shape):
     
             if current_code in inverted_codes:
                 decoded_data.append(inverted_codes[current_code])
+                # current_code1 = current_code
                 current_code = ''
     
     # '''
     
     
     # Reshape the decoded data into the original tensor shape
-    original_tensor = np.array(decoded_data[:-1]).reshape(tensor_shape)
+    if len(decoded_data) != np.prod(tensor_shape): # to handle bit to byte manipulation as it add some zeros
+        original_tensor = np.array(decoded_data[:np.prod(tensor_shape)]).reshape(tensor_shape)
+    else:
+        original_tensor = np.array(decoded_data).reshape(tensor_shape)
     return original_tensor
 
 def huffman_decode1(encoded_data, huffman_codes, tensor_shape):
